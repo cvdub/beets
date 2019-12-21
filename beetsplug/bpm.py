@@ -15,76 +15,70 @@
 
 """Determine BPM by pressing a key to the rhythm."""
 
-from __future__ import division, absolute_import, print_function
+from __future__ import absolute_import, division, print_function
 
+import os
+import subprocess
 import time
+
 from six.moves import input
 
 from beets import ui
 from beets.plugins import BeetsPlugin
 
 
-def bpm(max_strokes):
-    """Returns average BPM (possibly of a playing song)
-    listening to Enter keystrokes.
-    """
-    t0 = None
-    dt = []
-    for i in range(max_strokes):
-        # Press enter to the rhythm...
-        s = input()
-        if s == '':
-            t1 = time.time()
-            # Only start measuring at the second stroke
-            if t0:
-                dt.append(t1 - t0)
-            t0 = t1
-        else:
-            break
+def calculate_bpm(song_path, dry_run=False):
+    command = ["bpm-tag", "-n", song_path]
+    completed_process = subprocess.run(command, capture_output=True)
+    command_output = completed_process.stderr.decode("utf-8")
+    bpm = float(command_output.split()[-2])
+    return round(bpm)
 
-    # Return average BPM
-    # bpm = (max_strokes-1) / sum(dt) * 60
-    ave = sum([1.0 / dti * 60 for dti in dt]) / len(dt)
-    return ave
+
+# def bpm(max_strokes):
+#     """Returns average BPM (possibly of a playing song)
+#     listening to Enter keystrokes.
+#     """
+#     t0 = None
+#     dt = []
+#     for i in range(max_strokes):
+#         # Press enter to the rhythm...
+#         s = input()
+#         if s == "":
+#             t1 = time.time()
+#             # Only start measuring at the second stroke
+#             if t0:
+#                 dt.append(t1 - t0)
+#             t0 = t1
+#         else:
+#             break
+
+#     # Return average BPM
+#     # bpm = (max_strokes-1) / sum(dt) * 60
+#     ave = sum([1.0 / dti * 60 for dti in dt]) / len(dt)
+#     return ave
 
 
 class BPMPlugin(BeetsPlugin):
-
     def __init__(self):
         super(BPMPlugin, self).__init__()
-        self.config.add({
-            u'max_strokes': 3,
-            u'overwrite': True,
-        })
+        self.config.add({"max_strokes": 3, "overwrite": False})
 
     def commands(self):
-        cmd = ui.Subcommand('bpm',
-                            help=u'determine bpm of a song by pressing '
-                            u'a key to the rhythm')
+        cmd = ui.Subcommand("bpm", help="calculate bpm with bpm-tools")
         cmd.func = self.command
         return [cmd]
 
     def command(self, lib, opts, args):
+        should_write = ui.should_write()
+        should_overwrite = self.config["overwrite"].get(bool)
         items = lib.items(ui.decargs(args))
-        write = ui.should_write()
-        self.get_bpm(items, write)
+        for item in items:
+            bpm = calculate_bpm(item.path)
+            write = bool(should_write and (item["bpm"] and not should_overwrite))
+            self._log.info(f"{item} bpm: {bpm}, updated={write}")
+            item["bpm"] = bpm
 
-    def get_bpm(self, items, write=False):
-        overwrite = self.config['overwrite'].get(bool)
-        if len(items) > 1:
-            raise ValueError(u'Can only get bpm of one song at time')
-
-        item = items[0]
-        if item['bpm']:
-            self._log.info(u'Found bpm {0}', item['bpm'])
-            if not overwrite:
-                return
-
-        self._log.info(u'Press Enter {0} times to the rhythm or Ctrl-D '
-                       u'to exit', self.config['max_strokes'].get(int))
-        new_bpm = bpm(self.config['max_strokes'].get(int))
-        item['bpm'] = int(new_bpm)
-        if write:
-            item.try_write()
-        item.store()
-        self._log.info(u'Added new bpm {0}', item['bpm'])
+            if write:
+                item.try_write()
+            item.store()
