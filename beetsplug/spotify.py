@@ -81,13 +81,12 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
             }
         )
         self.config['client_secret'].redact = True
-
         self.tokenfile = self.config['tokenfile'].get(
-        self.register_listener('album_imported', self.save_spotify_album_ids)
-        self.register_listener('item_imported', self.save_spotify_item_ids)
             confuse.Filename(in_app_dir=True)
         )  # Path to the JSON file for storing the OAuth access token.
         self.setup()
+        self.register_listener('album_imported', self.save_spotify_album_ids)
+        self.register_listener('item_imported', self.save_spotify_item_ids)
 
     def setup(self):
         """Retrieve previously saved OAuth token or generate a new one."""
