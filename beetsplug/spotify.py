@@ -16,22 +16,22 @@
 """Adds Spotify release and track search support to the autotagger, along with
 Spotify playlist construction.
 """
-from __future__ import division, absolute_import, print_function
+from __future__ import absolute_import, division, print_function
 
-import re
-import json
 import base64
-import webbrowser
 import collections
+import json
+import re
+import webbrowser
 
+import confuse
+import requests
 import six
 import unidecode
-import requests
-import confuse
 
 from beets import ui
 from beets.autotag.hooks import AlbumInfo, TrackInfo
-from beets.plugins import MetadataSourcePlugin, BeetsPlugin
+from beets.plugins import BeetsPlugin, MetadataSourcePlugin
 
 
 class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
