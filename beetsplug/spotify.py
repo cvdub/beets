@@ -31,6 +31,7 @@ import unidecode
 
 from beets import ui
 from beets.autotag.hooks import AlbumInfo, TrackInfo
+from beets.dbcore import types
 from beets.plugins import BeetsPlugin, MetadataSourcePlugin
 
 
@@ -50,6 +51,16 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
     id_regex = {
         'pattern': r'(^|open\.spotify\.com/{}/)([0-9A-Za-z]{{22}})',
         'match_group': 2,
+    }
+    item_types = {
+        'spotify_artistid': types.STRING,
+        'spotify_albumid': types.STRING,
+        'spotify_albumartistid': types.STRING,
+        'spotify_trackid': types.STRING,
+    }
+    album_types = {
+        'spotify_albumid': types.STRING,
+        'spotify_albumartistid': types.STRING,
     }
 
     def __init__(self):
@@ -72,6 +83,8 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
         self.config['client_secret'].redact = True
 
         self.tokenfile = self.config['tokenfile'].get(
+        self.register_listener('album_imported', self.save_spotify_album_ids)
+        self.register_listener('item_imported', self.save_spotify_item_ids)
             confuse.Filename(in_app_dir=True)
         )  # Path to the JSON file for storing the OAuth access token.
         self.setup()
@@ -528,3 +541,17 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
             self._log.warning(
                 u'No {} tracks found from beets query'.format(self.data_source)
             )
+
+    def save_spotify_album_ids(self, lib, album):
+        """Store Spotify album IDs in dedicated flexible fields."""
+        album['spotify_albumid'] = album.mb_albumid
+        album['spotify_albumartistid'] = album.mb_albumartistid
+        album.store()
+        for item in album.items():
+            self.save_spotify_item_ids(lib, item)
+
+    def save_spotify_item_ids(self, lib, item):
+        """Store Spotify track IDs in dedicated flexible fields."""
+        item['spotify_trackid'] = item.mb_trackid
+        item['spotify_artistid'] = item.mb_artistid
+        item.store()
