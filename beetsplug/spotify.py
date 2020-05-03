@@ -45,6 +45,8 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
     search_url = 'https://api.spotify.com/v1/search'
     album_url = 'https://api.spotify.com/v1/albums/'
     track_url = 'https://api.spotify.com/v1/tracks/'
+    user_playlists_url = 'https://api.spotify.com/v1/users/%s/playlists'
+    playlist_tracks_url = 'https://api.spotify.com/v1/playlists/%s/tracks'
 
     # Spotify IDs consist of 22 alphanumeric characters
     # (zero-left-padded base62 representation of randomly generated UUID4)
@@ -78,6 +80,8 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
                 'client_id': '4e414367a1d14c75a5c5129a627fcab8',
                 'client_secret': 'f82bdc09b2254f1a8286815d02fd46dc',
                 'tokenfile': 'spotify_token.json',
+                'user_id': None,
+                'ignored_playlists': [],
             }
         )
         self.config['client_secret'].redact = True
@@ -386,7 +390,11 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
             ),
         )
         spotify_cmd.func = queries
-        return [spotify_cmd]
+
+        spotify_playlists_cmd = ui.Subcommand("spotify-playlists")
+        spotify_playlists_cmd.func = self.spotify_playlists
+
+        return [spotify_cmd, spotify_playlists_cmd]
 
     def _parse_opts(self, opts):
         if opts.mode:
@@ -554,3 +562,40 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
         item['spotify_trackid'] = item.mb_trackid
         item['spotify_artistid'] = item.mb_artistid
         item.store()
+
+    def _page(self, pages):
+        """Iterate API response."""
+        while pages:
+            for item in pages['items']:
+                yield item
+
+            if pages['next']:
+                pages = self._handle_response(requests.get, pages['next'])
+            else:
+                pages = None
+
+    def _user_playlists(self):
+        """Get a user's Spotify playlists."""
+        user_id = self.config['user_id'].get()
+        if not user_id:
+            self._log.error('No Spotify user_id found in config')
+            return
+
+        user_playlists_url = self.user_playlists_url % user_id
+        result = self._handle_response(requests.get, user_playlists_url)
+        for playlist in self._page(result):
+            if playlist['uri'] not in self.config['ignored_playlists'].get():
+                yield playlist
+
+    def _playlist_tracks(self, playlist_id):
+        """Get a Spotify playlist's tracks."""
+        playlist_tracks_url = self.playlist_tracks_url % playlist_id
+        result = self._handle_response(requests.get, playlist_tracks_url)
+        for track in self._page(result):
+            yield track
+
+    def spotify_playlists(self, lib, opts, args):
+        for playlist in self._user_playlists():
+            print(playlist['name'])
+            for track in self._playlist_tracks(playlist['id']):
+                print(track['track']['name'])
