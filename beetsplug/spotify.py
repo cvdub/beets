@@ -23,6 +23,8 @@ import collections
 import json
 import re
 import webbrowser
+from pathlib import Path
+from pprint import pprint
 
 import confuse
 import requests
@@ -33,12 +35,12 @@ from beets import ui
 from beets.autotag.hooks import AlbumInfo, TrackInfo
 from beets.dbcore import types
 from beets.plugins import BeetsPlugin, MetadataSourcePlugin
+from beets.util.async_commands import run_asyncio_commands, run_command_shell
 
 
 def sanitize_filename(filename):
     keepcharacters = (" ", ".", "_")
     return "".join(c for c in filename if c.isalnum() or c in keepcharacters).rstrip()
-
 
 
 class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
@@ -83,11 +85,12 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
                 "track_field": "title",
                 "region_filter": None,
                 "regex": [],
-                "client_id": "4e414367a1d14c75a5c5129a627fcab8",
-                "client_secret": "f82bdc09b2254f1a8286815d02fd46dc",
+                "client_id": "762912ef86244ec69340b73c9cd29880",
+                "client_secret": "f5f7c6f8ee78449eaccb046b18792fe9",
                 "tokenfile": "spotify_token.json",
                 "user_id": None,
                 "ignored_playlists": [],
+                "import_directory": None,
             }
         )
         self.config["client_secret"].redact = True
@@ -385,7 +388,16 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
         smartplaylist_cmd = ui.Subcommand("spotify-smartplaylists")
         smartplaylist_cmd.func = self.smartplaylist_config
 
-        return [spotify_cmd, spotify_playlists_cmd, missing_tracks_cmd, smartplaylist_cmd]
+        rip_cmd = ui.Subcommand("spotify-rip")
+        rip_cmd.func = self.rip
+
+        return [
+            spotify_cmd,
+            spotify_playlists_cmd,
+            missing_tracks_cmd,
+            smartplaylist_cmd,
+            rip_cmd,
+        ]
 
     def _parse_opts(self, opts):
         if opts.mode:
@@ -574,25 +586,35 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
             if not track["is_local"]:
                 yield track
 
-    def spotify_playlists(self, lib, opts, args):
-        for playlist in self._user_playlists():
-            print(playlist["name"])
-
-    def missing_tracks(self, lib, opts, args):
+    def get_missing_tracks(self, lib):
         missing_tracks = set()
         for playlist in self._user_playlists():
             for track in self._playlist_tracks(playlist["id"]):
                 uri = track["track"]["uri"][14:]
                 if not lib.items(f"mb_trackid:{uri}") and uri not in missing_tracks:
                     missing_tracks.add(uri)
-                    album_url = track["track"]["album"]["external_urls"][
-                        "spotify"
-                    ].split("/")[-1]
-                    print(album_url + " " + uri)
+                    yield track
 
+    def spotify_playlists(self, lib, opts, args):
+        for playlist in self._user_playlists():
+            print(playlist["name"])
+
+    def missing_tracks(self, lib, opts, args):
+        for track in self.get_missing_tracks(lib):
+            print(track["track"]["uri"])
+        # missing_tracks = set()
+        # for playlist in self._user_playlists():
+        #     for track in self._playlist_tracks(playlist["id"]):
+        #         uri = track["track"]["uri"][14:]
+        #         if not lib.items(f"mb_trackid:{uri}") and uri not in missing_tracks:
+        #             missing_tracks.add(uri)
+        #             album_url = track["track"]["album"]["external_urls"][
+        #                 "spotify"
+        #             ].split("/")[-1]
+        #             print(album_url + " " + uri)
 
     def smartplaylist_config(self, lib, opts, args):
-        PLAYLIST_DIRECTORY = "/home/cjv/downloads/wyatt-music/playlists/"
+        PLAYLIST_DIRECTORY = "/home/cjv/music/playlists/spotify/"
         print("smartplaylist:")
         print(f"  playlist_dir: {PLAYLIST_DIRECTORY}")
         print(f"  relative_to: {PLAYLIST_DIRECTORY}")
@@ -606,3 +628,13 @@ class SpotifyPlugin(MetadataSourcePlugin, BeetsPlugin):
                 query.append(f"mb_trackid:{uri}")
 
             print("      query: '" + " , ".join(query) + "'")
+
+    def rip(self, lib, opts, args):
+        tasks = []
+        import_directory = self.config["import_directory"].get()
+        for track in self.get_missing_tracks(lib):
+            album_url = track["track"]["album"]["external_urls"]["spotify"].split("/")[-1]
+            tasks.append(run_command_shell(f"spotify-ripper --directory {import_directory}/{album_url} {track['track']['uri']}"))
+        results = run_asyncio_commands(tasks, max_concurrent_tasks=10)
+        print("Results:")
+        pprint(results)
